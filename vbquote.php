@@ -243,7 +243,7 @@ function vbquote_parse_complex(&$page)
 	
 	global $db, $lang, $mybb, $templates, $theme;
 	$posts = array();
-	$query = $db->simple_select('posts', '*', 'pid IN ('.implode(',',array_keys($vbquote_quotedpids)).')');
+	$query = $db->simple_select('posts p LEFT JOIN '.TABLE_PREFIX.'users u ON (u.uid=p.uid)', 'p.*, u.usergroup, u.displaygroup', 'p.pid IN ('.implode(',',array_keys($vbquote_quotedpids)).')');
 	while($post = $db->fetch_array($query))
 		$posts[$post['pid']] = $post;
 	
@@ -264,7 +264,7 @@ function vbquote_parse_complex(&$page)
 			$date = my_date($mybb->settings['dateformat'], $post['dateline']).' '.my_date($mybb->settings['timeformat'], $post['dateline']);
 			
 			$r = '<span style="float: right; font-weight: normal;"> ('.$date.')</span>'
-				.build_profile_link(htmlspecialchars_uni($post['username']), $post['uid']).' '.$lang->wrote.$linkback;
+				.build_profile_link(format_name(htmlspecialchars_uni($post['username']), $post['usergroup'], $post['displaygroup']), $post['uid']).' '.$lang->wrote.$linkback;
 		}
 		$replaces['<!-- VBQUOTE_COMPLEX_QUOTE_'.$pid.' -->'] = $r;
 	}
