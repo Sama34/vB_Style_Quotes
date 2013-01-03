@@ -10,14 +10,32 @@ define('VBQUOTE_USE_COMPLEX_QUOTES', 1);
 if(!defined('IN_MYBB'))
 	die('This file cannot be accessed directly.');
 
-//$plugins->add_hook('newreply_end', 'vbquote_newreply');
-$plugins->add_hook('newreply_start', 'vbquote_newreply');
-$plugins->add_hook('xmlhttp', 'vbquote_xmlhttp');
-$plugins->add_hook('parse_message', 'vbquote_parse');
-$plugins->add_hook('parse_message_start', 'vbquote_parse_pre_fix');
-$plugins->add_hook('text_parse_message', 'vbquote_parse_text');
+// Cache our template
+if(THIS_SCRIPT == 'newreply.php' || THIS_SCRIPT == 'newthread.php' || THIS_SCRIPT == 'showthread.php' || THIS_SCRIPT == 'editpost.php' || THIS_SCRIPT == 'private.php')
+{
+	global $templatelist;
 
-$plugins->add_hook('parse_quoted_message', 'vbquote_make_quote');
+	if(isset($templatelist))
+	{
+		$templatelist .= ',';
+	}
+	else
+	{
+		$templatelist = '';
+	}
+
+	$templatelist .= 'vbquote';
+}
+
+if(!defined('IN_ADMINCP'))
+{
+	$plugins->add_hook('newreply_start', 'vbquote_newreply');
+	$plugins->add_hook('xmlhttp', 'vbquote_xmlhttp');
+	$plugins->add_hook('parse_message', 'vbquote_parse');
+	$plugins->add_hook('parse_message_start', 'vbquote_parse_pre_fix');
+	$plugins->add_hook('text_parse_message', 'vbquote_parse_text');
+	$plugins->add_hook('parse_quoted_message', 'vbquote_make_quote');
+}
 
 function vbquote_info()
 {
@@ -43,15 +61,6 @@ function vbquote_make_quote(&$msg) {
 	}
 	$vbquote_quote_text .= ';'.$msg['pid']."]\n$msg[message]\n".'[/quote]'."\n\n";
 }
-
-/*function vbquote_newreply()
-{
-	global $mybb, $quoted_posts, $message;
-	if(count($quoted_posts) < 1) return;
-	
-	// if we have quoted posts, then we'll have to reconstruct the message
-	vbquote_convert_quotes($message);
-}*/
 
 function vbquote_control_db() {
 	function vbquote_fix_quotes() {
@@ -96,43 +105,19 @@ function vbquote_xmlhttp() {
 	if($mybb->input['action'] != 'get_multiquoted') return;
 	vbquote_control_db();
 }
-/*
-function vbquote_xmlhttp()
-{
-	if(!defined('IN_XMLHTTP'))
-		define('IN_XMLHTTP', 1);
-	
-	global $mybb;
-	if($mybb->input['action'] != 'get_multiquoted') return;
-	ob_start();
-	
-	function vbquote_xmlhttp_parse()
-	{
-		global $message;
-		if(!$message)
-		{
-			ob_end_flush();
-			return;
-		}
-		
-		ob_end_clean();
-		vbquote_convert_quotes($message);
-		echo $message;
-	}
-	register_shutdown_function('vbquote_xmlhttp_parse');
-}
-*/
 
 // work around MyBB's dodgy quote parser for [] characters
 function vbquote_parse_pre_fix_parse($name) {
 	return strtr($name, array('[' => '&#x5B;', ']' => '&#x5D;', "\r" => ''));
 }
+
 function &vbquote_parse_pre_fix(&$message) {
 	$pattern = '~\[quote=(&quot;|["\'])(.*?)\\1(;[0-9]+\].*?\[/quote\])~sie';
 	while($message != ($new_msg = preg_replace('~\[quote=(&quot;|["\'])(.*?)\\1(;[0-9]+\].*?\[/quote\])~sie', '\'[quote=$1\'.vbquote_parse_pre_fix_parse(\'$2\').\'$1$3\'', $message)))
 		$message = $new_msg;
 	return $message;
 }
+
 function &vbquote_parse(&$message, $text_only=false)
 {
 	// TODO: push regex into parser cache
@@ -172,7 +157,6 @@ function &vbquote_parse(&$message, $text_only=false)
 }
 
 function vbquote_parse_text(&$msg) { return vbquote_parse($msg, true); }
-
 
 function vbquote_parse_quote($user, $pid, $text_only=false)
 {
@@ -231,8 +215,6 @@ function vbquote_parse_quote_user($user, $pid, $text_only=false)
 	return $user.' '.$lang->wrote.$linkback;
 }
 
-
-
 function vbquote_parse_complex(&$page)
 {
 	global $vbquote_quotedpids;
@@ -243,10 +225,14 @@ function vbquote_parse_complex(&$page)
 	
 	global $db, $lang, $mybb, $templates, $theme;
 	$posts = array();
-	$query = $db->simple_select('posts p LEFT JOIN '.TABLE_PREFIX.'users u ON (u.uid=p.uid)', 'p.*, u.usergroup, u.displaygroup', 'p.pid IN ('.implode(',',array_keys($vbquote_quotedpids)).')');
+	$query = $db->simple_select('posts p LEFT JOIN '.TABLE_PREFIX.'users u ON (u.uid=p.uid)', 'p.*, u.usergroup, u.displaygroup, u.avatar, u.avatardimensions', 'p.pid IN ('.implode(',',array_keys($vbquote_quotedpids)).')');
 	while($post = $db->fetch_array($query))
 		$posts[$post['pid']] = $post;
-	
+
+	if(!isset($templates->cache['vbquote']))
+	{
+		$templates->cache['vbquote'] = '<span style="float: right; font-weight: normal;"> ({$date})</span>{$username} {$lang->wrote}{$linkback}';
+	}
 	$replaces = array();
 	foreach($vbquote_quotedpids as $pid => $uname)
 	{
@@ -262,9 +248,24 @@ function vbquote_parse_complex(&$page)
 			eval('$linkback = " '.$templates->get('postbit_gotopost', 1, 0).'";');
 			
 			$date = my_date($mybb->settings['dateformat'], $post['dateline']).' '.my_date($mybb->settings['timeformat'], $post['dateline']);
-			
-			$r = '<span style="float: right; font-weight: normal;"> ('.$date.')</span>'
-				.build_profile_link(format_name(htmlspecialchars_uni($post['username']), $post['usergroup'], $post['displaygroup']), $post['uid']).' '.$lang->wrote.$linkback;
+			$username = htmlspecialchars_uni($post['username']);
+			$formatedname = format_name($username, $post['usergroup'], $post['displaygroup']);
+			$profilelink_plain = get_profile_link($post['uid']);
+			$profilelink = build_profile_link($formatedname, $post['uid']);
+
+			if(function_exists('format_avatar'))
+			{
+				$avatar = format_avatar($post['avatar'], $post['avatardimensions']);
+			}
+			else
+			{
+				$avatar = array(
+					'image'			=> $post['avatar'],
+					'width_height'	=> '',
+				);
+			}
+
+			eval('$r = "'.$templates->get('vbquote').'";');
 		}
 		$replaces['<!-- VBQUOTE_COMPLEX_QUOTE_'.$pid.' -->'] = $r;
 	}
@@ -273,13 +274,6 @@ function vbquote_parse_complex(&$page)
 	
 	return strtr($page, $replaces);
 }
-
-
-//  * has issues if quoted message already contains old MyBB 1.4 style quotes
-/* function vbquote_convert_quotes(&$message)
-{
-	$message = preg_replace('#\[quote=(["\'])?(.*?)\\1 (?:[^\]].*?)?pid=(["\'])?([0-9]+)\\3(?:[^\]].*?)?\](.*?)\[/quote\]#si', '[quote=$2;$4]$5[/quote]', $message);
-} */
 
 if(!function_exists('control_object')) {
 	function control_object(&$obj, $code) {
@@ -312,6 +306,3 @@ if(!function_exists('control_object')) {
 		// else not a valid object or PHP serialize has changed
 	}
 }
-
-
-?>
