@@ -45,8 +45,8 @@ function vbquote_info()
 		'website'		=> 'http://mybbhacks.zingaburga.com/',
 		'author'		=> 'ZiNgA BuRgA',
 		'authorsite'	=> 'http://zingaburga.com/',
-		'version'		=> '1.13',
-		'compatibility'	=> '16*',
+		'version'		=> '1.15',
+		'compatibility'	=> '16*,17*,18*',
 		'guid'			=> ''
 	);
 }
@@ -75,16 +75,16 @@ function vbquote_control_db() {
 			}
 			return parent::query($string, $hide_errors, $write_query);
 		}
-		function fetch_array($query) {
+		function fetch_array($query, $resulttype=1) {
 			if($this->vbquote_query === $query) {
-				$ret = parent::fetch_array($query);
+				$ret = parent::fetch_array($query, $resulttype);
 				if(!$ret) {
 					vbquote_fix_quotes();
 					$this->vbquote_query = 1;
 				}
 				return $ret;
 			}
-			return parent::fetch_array($query);
+			return parent::fetch_array($query, $resulttype);
 		}
 	');
 	$GLOBALS['db']->vbquote_query = null;
@@ -110,14 +110,12 @@ function vbquote_xmlhttp() {
 function vbquote_parse_pre_fix_parse($name) {
 	return strtr($name, array('[' => '&#x5B;', ']' => '&#x5D;', "\r" => ''));
 }
-
 function &vbquote_parse_pre_fix(&$message) {
 	$pattern = '~\[quote=(&quot;|["\'])(.*?)\\1(;[0-9]+\].*?\[/quote\])~sie';
 	while($message != ($new_msg = preg_replace('~\[quote=(&quot;|["\'])(.*?)\\1(;[0-9]+\].*?\[/quote\])~sie', '\'[quote=$1\'.vbquote_parse_pre_fix_parse(\'$2\').\'$1$3\'', $message)))
 		$message = $new_msg;
 	return $message;
 }
-
 function &vbquote_parse(&$message, $text_only=false)
 {
 	// TODO: push regex into parser cache
@@ -182,11 +180,33 @@ function vbquote_parse_quote($user, $pid, $text_only=false)
 			if(!$ajax_done)
 			{
 				ob_start();
-				function vbquote_xmlhttp_preoutput()
+				if($mybb->version_code >= 1700)
 				{
-					run_shutdown();	// reconstruct objects if destroyed (urgh, won't fix $lang, $templates and $theme)
-					$page = ob_get_clean();
-					echo vbquote_parse_complex($page);
+					function vbquote_xmlhttp_preoutput()
+					{
+						run_shutdown();	// reconstruct objects if destroyed (urgh, won't fix $lang, $templates and $theme)
+						$page = ob_get_clean();
+						$data = @json_decode($page);
+						if(!is_object($data))
+						{ // something not right, bail
+							echo $page;
+							return;
+						}
+						if(isset($data->data)) // newreply
+							$data->data = vbquote_parse_complex($data->data);
+						elseif(isset($data->message)) // editpost
+							$data->message = vbquote_parse_complex($data->message);
+						echo json_encode($data);
+					}
+				}
+				else
+				{
+					function vbquote_xmlhttp_preoutput()
+					{
+						run_shutdown();	// reconstruct objects if destroyed (urgh, won't fix $lang, $templates and $theme)
+						$page = ob_get_clean();
+						echo vbquote_parse_complex($page);
+					}
 				}
 				register_shutdown_function('vbquote_xmlhttp_preoutput');
 				$ajax_done = true;
@@ -231,7 +251,7 @@ function vbquote_parse_complex(&$page)
 
 	if(!isset($templates->cache['vbquote']))
 	{
-		$templates->cache['vbquote'] = '<span style="float: right; font-weight: normal;"> ({$date})</span>{$username} {$lang->wrote}{$linkback}';
+		//$templates->cache['vbquote'] = '<span style="float: right; font-weight: normal;"> ({$date})</span>{$username} {$lang->wrote}{$linkback}';
 	}
 	$replaces = array();
 	foreach($vbquote_quotedpids as $pid => $uname)
@@ -246,19 +266,20 @@ function vbquote_parse_complex(&$page)
 		{
 			$url = $mybb->settings['bburl'].'/'.get_post_link($pid).'#pid'.$pid;
 			eval('$linkback = " '.$templates->get('postbit_gotopost', 1, 0).'";');
-			
-			$date = my_date($mybb->settings['dateformat'], $post['dateline']).' '.my_date($mybb->settings['timeformat'], $post['dateline']);
+
 			$username = htmlspecialchars_uni($post['username']);
 			$formatedname = format_name($username, $post['usergroup'], $post['displaygroup']);
 			$profilelink_plain = get_profile_link($post['uid']);
 			$profilelink = build_profile_link($formatedname, $post['uid']);
 
-			if(function_exists('format_avatar'))
+			if($mybb->version_code >= 1700)
 			{
+				$date = my_date('relative', $post['dateline']);
 				$avatar = format_avatar($post['avatar'], $post['avatardimensions']);
 			}
 			else
 			{
+				$date = my_date($mybb->settings['dateformat'], $post['dateline']).' '.my_date($mybb->settings['timeformat'], $post['dateline']);
 				$avatar = array(
 					'image'			=> $post['avatar'],
 					'width_height'	=> '',
